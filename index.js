@@ -1,13 +1,15 @@
 // screener-backend/index.js
 
+require("dotenv").config(); // Load env vars FIRST
+
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const OpenAI = require("openai");
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,14 +35,14 @@ app.post("/screening/:id/respond", async (req, res) => {
   if (!prompt) return res.status(404).json({ error: "Invalid screening ID" });
 
   try {
-    const response = await openai.createChatCompletion({
+    const response = await openai.chat.completions.create({
       model: "gpt-4",
       messages: [
         { role: "system", content: prompt },
         ...messages
       ]
     });
-    res.json({ reply: response.data.choices[0].message });
+    res.json({ reply: response.choices[0].message });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong." });
