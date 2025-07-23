@@ -6,24 +6,27 @@ const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const { v4: uuidv4 } = require("uuid");
-const OpenAI = require("openai");
 const { Pool } = require("pg");
+const OpenAI = require("openai");
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Connect to PostgreSQL
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false, // For Render's self-signed certs
-  },
+// OpenAI setup
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Create table if not exists
+// PostgreSQL connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+});
+
+// Ensure screenings table exists
 async function ensureTable() {
+  console.log("🛠 Checking screenings table...");
+  const client = await pool.connect();
   try {
-    await pool.query(`
+    await client.query("SET statement_timeout TO 5000"); // 5 seconds timeout
+    await client.query(`
       CREATE TABLE IF NOT EXISTS screenings (
         id TEXT PRIMARY KEY,
         prompt TEXT NOT NULL,
@@ -32,76 +35,68 @@ async function ensureTable() {
     `);
     console.log("✅ screenings table is ready.");
   } catch (err) {
-    console.error("❌ Error creating screenings table:", err);
+    console.error("❌ Error creating table:", err);
+  } finally {
+    client.release();
   }
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-// CORS only for Vercel frontend
 app.use(cors({
-  origin: "https://screener-agent-connect.vercel.app",
+  origin: "https://screener-agent-connect.vercel.app"
 }));
-
 app.use(bodyParser.json());
 
 // Create screening
 app.post("/screening", async (req, res) => {
-  const { prompt } = req.body;
+  const { id, jobTitle, companyName, jobDescription } = req.body;
 
-  if (!prompt) {
-    return res.status(400).json({ error: "Prompt is required" });
+  if (!id || !jobTitle || !companyName || !jobDescription) {
+    return res.status(400).json({ error: "Missing required fields." });
   }
 
-  const id = uuidv4();
+  const prompt = `You're screening a candidate for the role of ${jobTitle} at ${companyName}. Use the following job description to guide your questions:\n\n${jobDescription}`;
 
   try {
-    await pool.query(
-      "INSERT INTO screenings (id, prompt) VALUES ($1, $2)",
-      [id, prompt]
-    );
-    console.log("✅ New screening created:", { id, prompt });
-    res.json({ id });
+    await pool.query("INSERT INTO screenings (id, prompt) VALUES ($1, $2)", [id, prompt]);
+    console.log("✅ New screening stored in DB:", { id });
+    res.json({ success: true });
   } catch (err) {
-    console.error("❌ DB insert error:", err);
-    res.status(500).json({ error: "DB insert failed" });
+    console.error("❌ Error inserting screening:", err);
+    res.status(500).json({ error: "Failed to store screening." });
   }
 });
 
 // Get screening prompt
 app.get("/screening/:id", async (req, res) => {
   const { id } = req.params;
+  console.log("🔍 Fetching screening ID:", id);
 
   try {
-    const result = await pool.query(
-      "SELECT prompt FROM screenings WHERE id = $1",
-      [id]
-    );
+    const result = await pool.query("SELECT prompt FROM screenings WHERE id = $1", [id]);
 
     if (result.rows.length === 0) {
-      console.log("❌ Screening NOT found for ID:", id);
+      console.log("❌ Screening NOT found:", id);
       return res.status(404).json({ error: "Invalid screening ID" });
     }
 
     console.log("✅ Screening found:", id);
     res.json({ prompt: result.rows[0].prompt });
   } catch (err) {
-    console.error("❌ DB query error:", err);
-    res.status(500).json({ error: "Database error" });
+    console.error("❌ Error fetching screening:", err);
+    res.status(500).json({ error: "Failed to retrieve screening." });
   }
 });
 
 // Respond to screening
 app.post("/screening/:id/respond", async (req, res) => {
   const { messages } = req.body;
+  const { id } = req.params;
 
   try {
-    const result = await pool.query(
-      "SELECT prompt FROM screenings WHERE id = $1",
-      [req.params.id]
-    );
+    const result = await pool.query("SELECT prompt FROM screenings WHERE id = $1", [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Invalid screening ID" });
@@ -116,15 +111,20 @@ app.post("/screening/:id/respond", async (req, res) => {
 
     res.json({ reply: response.choices[0].message });
   } catch (err) {
-    console.error("❌ Error handling response:", err);
+    console.error("❌ Error during screening response:", err);
     res.status(500).json({ error: "Something went wrong." });
   }
 });
 
-// Optional debug route
+// Debug route
 app.get("/debug/screenings", async (req, res) => {
-  const result = await pool.query("SELECT * FROM screenings ORDER BY created_at DESC LIMIT 10");
-  res.json(result.rows);
+  try {
+    const result = await pool.query("SELECT * FROM screenings ORDER BY created_at DESC LIMIT 10");
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Error fetching debug data:", err);
+    res.status(500).json({ error: "Failed to load debug data." });
+  }
 });
 
 // Start server
