@@ -1,6 +1,6 @@
 // screener-backend/index.js
 
-require("dotenv").config();
+require("dotenv").config(); // Load env vars FIRST
 
 const express = require("express");
 const cors = require("cors");
@@ -9,21 +9,45 @@ const { v4: uuidv4 } = require("uuid");
 const OpenAI = require("openai");
 const { Pool } = require("pg");
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ✅ Restrict CORS to frontend only
+// Connect to PostgreSQL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false, // For Render's self-signed certs
+  },
+});
+
+// Create table if not exists
+async function ensureTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS screenings (
+        id TEXT PRIMARY KEY,
+        prompt TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("✅ screenings table is ready.");
+  } catch (err) {
+    console.error("❌ Error creating screenings table:", err);
+  }
+}
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// CORS only for Vercel frontend
 app.use(cors({
-  origin: "https://screener-agent-connect.vercel.app"
+  origin: "https://screener-agent-connect.vercel.app",
 }));
+
 app.use(bodyParser.json());
 
-/**
- * CREATE SCREENING — inserts a new prompt into the DB
- */
+// Create screening
 app.post("/screening", async (req, res) => {
   const { prompt } = req.body;
 
@@ -34,47 +58,51 @@ app.post("/screening", async (req, res) => {
   const id = uuidv4();
 
   try {
-    await pool.query("INSERT INTO screenings (id, prompt) VALUES ($1, $2)", [id, prompt]);
+    await pool.query(
+      "INSERT INTO screenings (id, prompt) VALUES ($1, $2)",
+      [id, prompt]
+    );
     console.log("✅ New screening created:", { id, prompt });
     res.json({ id });
   } catch (err) {
-    console.error("❌ Error inserting into DB:", err);
-    res.status(500).json({ error: "Could not create screening" });
+    console.error("❌ DB insert error:", err);
+    res.status(500).json({ error: "DB insert failed" });
   }
 });
 
-/**
- * GET SCREENING — retrieves the prompt from DB by ID
- */
+// Get screening prompt
 app.get("/screening/:id", async (req, res) => {
   const { id } = req.params;
-  console.log("🔍 Fetching screening ID:", id);
 
   try {
-    const result = await pool.query("SELECT prompt FROM screenings WHERE id = $1", [id]);
+    const result = await pool.query(
+      "SELECT prompt FROM screenings WHERE id = $1",
+      [id]
+    );
+
     if (result.rows.length === 0) {
-      console.log("❌ Screening NOT found:", id);
+      console.log("❌ Screening NOT found for ID:", id);
       return res.status(404).json({ error: "Invalid screening ID" });
     }
 
-    const prompt = result.rows[0].prompt;
-    console.log("✅ Screening found:", prompt);
-    res.json({ prompt });
+    console.log("✅ Screening found:", id);
+    res.json({ prompt: result.rows[0].prompt });
   } catch (err) {
-    console.error("❌ Error fetching from DB:", err);
-    res.status(500).json({ error: "Could not retrieve screening" });
+    console.error("❌ DB query error:", err);
+    res.status(500).json({ error: "Database error" });
   }
 });
 
-/**
- * POST RESPONSE — OpenAI call using screening prompt from DB
- */
+// Respond to screening
 app.post("/screening/:id/respond", async (req, res) => {
   const { messages } = req.body;
-  const { id } = req.params;
 
   try {
-    const result = await pool.query("SELECT prompt FROM screenings WHERE id = $1", [id]);
+    const result = await pool.query(
+      "SELECT prompt FROM screenings WHERE id = $1",
+      [req.params.id]
+    );
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Invalid screening ID" });
     }
@@ -93,16 +121,14 @@ app.post("/screening/:id/respond", async (req, res) => {
   }
 });
 
-/**
- * DEBUG SCREENINGS — shows recent entries in the DB
- */
+// Optional debug route
 app.get("/debug/screenings", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM screenings ORDER BY created_at DESC LIMIT 50");
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: "Unable to fetch debug info" });
-  }
+  const result = await pool.query("SELECT * FROM screenings ORDER BY created_at DESC LIMIT 10");
+  res.json(result.rows);
 });
 
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// Start server
+app.listen(PORT, async () => {
+  await ensureTable();
+  console.log(`🚀 Server running on port ${PORT}`);
+});
