@@ -5,6 +5,7 @@ require("dotenv").config(); // Load env vars FIRST
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
+const { v4: uuidv4 } = require("uuid"); // For generating unique IDs
 const OpenAI = require("openai");
 
 const openai = new OpenAI({
@@ -17,36 +18,67 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// Sample in-memory prompts by ID (normally you'd use a DB)
+// In-memory "database"
 const screeningPrompts = {
-  "abc123": "You're a recruiter. Ask the candidate about their experience with team leadership.",
-  "xyz789": "You're screening for a frontend developer. Ask about React and JavaScript experience."
+  abc123: "You're a recruiter. Ask the candidate about their experience with team leadership.",
+  xyz789: "You're screening for a frontend developer. Ask about React and JavaScript experience.",
 };
 
+// 👇 NEW: Create screening route
+app.post("/screening", (req, res) => {
+  const { prompt } = req.body;
+
+  if (!prompt) {
+    return res.status(400).json({ error: "Prompt is required" });
+  }
+
+  const id = uuidv4();
+  screeningPrompts[id] = prompt;
+
+  console.log("✅ New screening created:", { id, prompt });
+
+  res.json({ id });
+});
+
+// ✅ Enhanced GET route with logging
 app.get("/screening/:id", (req, res) => {
-  const prompt = screeningPrompts[req.params.id];
-  if (!prompt) return res.status(404).json({ error: "Invalid screening ID" });
+  const { id } = req.params;
+  console.log("🔍 Fetching screening ID:", id);
+
+  const prompt = screeningPrompts[id];
+
+  if (!prompt) {
+    console.log("❌ Screening NOT found for ID:", id);
+    return res.status(404).json({ error: "Invalid screening ID" });
+  }
+
+  console.log("✅ Screening found:", prompt);
   res.json({ prompt });
 });
 
+// Respond route
 app.post("/screening/:id/respond", async (req, res) => {
   const { messages } = req.body;
   const prompt = screeningPrompts[req.params.id];
+
   if (!prompt) return res.status(404).json({ error: "Invalid screening ID" });
 
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4",
-      messages: [
-        { role: "system", content: prompt },
-        ...messages
-      ]
+      messages: [{ role: "system", content: prompt }, ...messages],
     });
+
     res.json({ reply: response.choices[0].message });
   } catch (err) {
-    console.error(err);
+    console.error("❌ OpenAI error:", err);
     res.status(500).json({ error: "Something went wrong." });
   }
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// 🔍 Optional debug route
+app.get("/debug/screenings", (req, res) => {
+  res.json(screeningPrompts);
+});
+
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
