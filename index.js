@@ -15,7 +15,10 @@ const openai = new OpenAI({
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// ✅ Restrict CORS to Vercel frontend
+app.use(cors({
+  origin: "https://screener-agent-connect.vercel.app"
+}));
 app.use(bodyParser.json());
 
 // In-memory "database"
@@ -24,7 +27,7 @@ const screeningPrompts = {
   xyz789: "You're screening for a frontend developer. Ask about React and JavaScript experience.",
 };
 
-// 👇 NEW: Create screening route
+// 👇 Create screening route
 app.post("/screening", (req, res) => {
   const { prompt } = req.body;
 
@@ -40,7 +43,7 @@ app.post("/screening", (req, res) => {
   res.json({ id });
 });
 
-// ✅ Enhanced GET route with logging
+// ✅ GET route with logging
 app.get("/screening/:id", (req, res) => {
   const { id } = req.params;
   console.log("🔍 Fetching screening ID:", id);
@@ -56,7 +59,7 @@ app.get("/screening/:id", (req, res) => {
   res.json({ prompt });
 });
 
-// Respond route
+// Handle response to screening
 app.post("/screening/:id/respond", async (req, res) => {
   const { messages } = req.body;
   const prompt = screeningPrompts[req.params.id];
@@ -76,7 +79,7 @@ app.post("/screening/:id/respond", async (req, res) => {
   }
 });
 
-// 🔍 Optional debug route
+// Optional debug route
 app.get("/debug/screenings", (req, res) => {
   res.json(screeningPrompts);
 });
