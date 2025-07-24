@@ -131,6 +131,28 @@ app.post("/screening/:id/respond", async (req, res) => {
   }
 });
 
+// Save candidate info after screening has started
+app.post("/screening/:id/start", async (req, res) => {
+  const { id } = req.params;
+  const { candidateName, candidateEmail } = req.body;
+
+  if (!candidateName || !candidateEmail) {
+    return res.status(400).json({ error: "Missing candidate info" });
+  }
+
+  try {
+    await pool.query(
+      "UPDATE screenings SET candidate_name = $1, candidate_email = $2 WHERE id = $3",
+      [candidateName, candidateEmail, id]
+    );
+    console.log("✅ Candidate info saved for screening:", id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Error saving candidate info:", err);
+    res.status(500).json({ error: "Failed to save candidate info" });
+  }
+});
+
 // Debug route
 app.get("/debug/screenings", async (req, res) => {
   try {
