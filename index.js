@@ -4,12 +4,10 @@ require("dotenv").config(); // Load env vars FIRST
 
 const express = require("express");
 const cors = require("cors");
-const bodyParser = require("body-parser");
 const { v4: uuidv4 } = require("uuid");
 const { Pool } = require("pg");
 const OpenAI = require("openai");
 
-// OpenAI setup
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -30,6 +28,11 @@ async function ensureTable() {
       CREATE TABLE IF NOT EXISTS screenings (
         id TEXT PRIMARY KEY,
         prompt TEXT NOT NULL,
+        job_title TEXT,
+        company_name TEXT,
+        job_description TEXT,
+        candidate_name TEXT,
+        candidate_email TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -51,6 +54,8 @@ app.use(cors({
   ],
   credentials: true
 }));
+
+app.use(express.json()); // ✅ Body parser replacement
 
 // Create screening
 app.post("/screening", async (req, res) => {
@@ -172,3 +177,4 @@ app.listen(PORT, async () => {
   await ensureTable();
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
