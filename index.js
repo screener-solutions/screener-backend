@@ -45,9 +45,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({
-  origin: "https://screener-agent-connect.vercel.app"
+app.use(cors({
+  origin: [
+    "https://screener-agent-connect.vercel.app",
+    "https://app.screener.solutions"
+  ]
 }));
-app.use(bodyParser.json());
 
 // Create screening
 app.post("/screening", async (req, res) => {
